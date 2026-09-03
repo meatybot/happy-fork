@@ -1,0 +1,106 @@
+name: Build Android APK
+
+# Fortnightly unsigned APK build for self-hosted use.
+# Runs `expo prebuild` (the repo ships no android/ directory) then Gradle
+# assembleRelease locally -- no EAS account or Expo credentials required.
+
+on:
+    schedule:
+        # 06:00 UTC on the 1st and 15th -> every ~2 weeks.
+        - cron: '0 6 1,15 * *'
+    workflow_dispatch:
+        inputs:
+            app_env:
+                description: 'APP_ENV variant to build'
+                type: choice
+                default: preview
+                options: [preview, production, development]
+    push:
+        paths:
+            - '.github/workflows/android-apk.yml'
+
+concurrency:
+    group: android-apk-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        timeout-minutes: 60
+        env:
+            APP_ENV: ${{ inputs.app_env || 'preview' }}
+            SHARP_IGNORE_GLOBAL_LIBVIPS: '1'
+            SKIP_HAPPY_WIRE_BUILD: '1'
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  # app.config.js derives build metadata from git history.
+                  fetch-depth: 0
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: pnpm
+
+            - name: Setup JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '17'
+
+            - name: Setup Android SDK
+              uses: android-actions/setup-android@v3
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Expo prebuild (generate android/)
+              working-directory: packages/happy-app
+              run: pnpm exec expo prebuild --platform android --no-install
+
+            - name: Gradle assembleRelease
+              working-directory: packages/happy-app/android
+              run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+            - name: Collect APKs
+              id: collect
+              run: |
+                  mkdir -p dist
+                  find packages/happy-app/android -name '*.apk' -path '*release*' -exec cp {} dist/ \;
+                  ls -la dist
+                  echo "count=$(find dist -name '*.apk' | wc -l)" >> "$GITHUB_OUTPUT"
+                  echo "date=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+
+            - name: Fail if no APK produced
+              if: steps.collect.outputs.count == '0'
+              run: echo "::error::Gradle reported success but produced no APK" && exit 1
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: happy-android-${{ env.APP_ENV }}-${{ github.sha }}
+                  path: dist/*.apk
+                  retention-days: 90
+                  if-no-files-found: error
+
+            - name: Publish rolling release
+              if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  TAG="apk-${{ steps.collect.outputs.date }}"
+                  gh release delete "$TAG" --yes --cleanup-tag || true
+                  gh release create "$TAG" dist/*.apk \
+                    --title "Android APK ${{ steps.collect.outputs.date }}" \
+                    --notes "Unsigned \`${APP_ENV}\` APK built from \`${GITHUB_SHA}\`.
+
+                  Debug-signed by Gradle -- uninstall any Play Store build before installing (signature mismatch).
+                  Push notifications use the upstream Firebase project; deep links still point at \`app.happy.engineering\`."
