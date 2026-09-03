@@ -1,8 +1,10 @@
-name: Build Android APK
+name: Sync upstream and build Android APK
 
-# Fortnightly unsigned APK build for self-hosted use.
-# Runs `expo prebuild` (the repo ships no android/ directory) then Gradle
-# assembleRelease locally -- no EAS account or Expo credentials required.
+# Fortnightly: fast-forward this fork from slopus/happy, and if anything
+# changed (or the app version moved), build an unsigned APK and publish it as
+# a GitHub Release on this repo.
+#
+# Builds locally with `expo prebuild` + Gradle -- no EAS account required.
 
 on:
     schedule:
@@ -10,35 +12,102 @@ on:
         - cron: '0 6 1,15 * *'
     workflow_dispatch:
         inputs:
+            force_build:
+                description: 'Build even when upstream has no new commits'
+                type: boolean
+                default: false
             app_env:
                 description: 'APP_ENV variant to build'
                 type: choice
                 default: preview
                 options: [preview, production, development]
-    push:
-        paths:
-            - '.github/workflows/android-apk.yml'
 
 concurrency:
-    group: android-apk-${{ github.ref }}
-    cancel-in-progress: true
+    group: android-apk
+    cancel-in-progress: false
 
 permissions:
     contents: write
 
+env:
+    UPSTREAM: https://github.com/slopus/happy.git
+    APP_ENV: ${{ inputs.app_env || 'preview' }}
+
 jobs:
+    sync:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        outputs:
+            changed: ${{ steps.check.outputs.changed }}
+            sha: ${{ steps.check.outputs.sha }}
+            short_sha: ${{ steps.check.outputs.short_sha }}
+            version: ${{ steps.check.outputs.version }}
+            tag: ${{ steps.check.outputs.tag }}
+        steps:
+            - name: Checkout fork
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Merge upstream
+              run: |
+                  git config user.name  'github-actions[bot]'
+                  git config user.email 'github-actions[bot]@users.noreply.github.com'
+                  git remote add upstream "$UPSTREAM" 2>/dev/null || git remote set-url upstream "$UPSTREAM"
+                  git fetch upstream --tags --prune
+                  BEFORE=$(git rev-parse HEAD)
+                  # Keep our workflow/README on top of upstream's history.
+                  git merge --no-edit -X ours upstream/main || {
+                      echo "::error::Merge conflict with upstream -- resolve locally"; exit 1; }
+                  echo "BEFORE=$BEFORE" >> "$GITHUB_ENV"
+
+            - name: Detect changes
+              id: check
+              run: |
+                  AFTER=$(git rev-parse HEAD)
+                  VERSION=$(node -e "console.log((require('fs').readFileSync('packages/happy-app/app.config.js','utf8').match(/^\s*version:\s*[\"']([^\"']+)[\"']/m)||[])[1]||'0.0.0')")
+                  TAG="v${VERSION}-$(git rev-parse --short upstream/main)"
+
+                  # Build when upstream moved, when we have no release for this
+                  # tag yet, or when manually forced.
+                  CHANGED=false
+                  [ "$BEFORE" != "$AFTER" ] && CHANGED=true
+                  if ! gh release view "$TAG" >/dev/null 2>&1; then CHANGED=true; fi
+                  [ "${{ inputs.force_build }}" = "true" ] && CHANGED=true
+
+                  {
+                    echo "changed=$CHANGED"
+                    echo "sha=$AFTER"
+                    echo "short_sha=$(git rev-parse --short upstream/main)"
+                    echo "version=$VERSION"
+                    echo "tag=$TAG"
+                  } >> "$GITHUB_OUTPUT"
+
+                  echo "### Upstream sync" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- app version: \`$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- upstream: \`$(git rev-parse --short upstream/main)\`" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- build needed: \`$CHANGED\`" >> "$GITHUB_STEP_SUMMARY"
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Push merged history
+              if: steps.check.outputs.changed == 'true'
+              run: git push origin HEAD:${{ github.event.repository.default_branch }}
+
     build:
+        needs: sync
+        if: needs.sync.outputs.changed == 'true'
         runs-on: ubuntu-latest
         timeout-minutes: 60
         env:
-            APP_ENV: ${{ inputs.app_env || 'preview' }}
             SHARP_IGNORE_GLOBAL_LIBVIPS: '1'
             SKIP_HAPPY_WIRE_BUILD: '1'
         steps:
-            - name: Checkout
+            - name: Checkout merged commit
               uses: actions/checkout@v4
               with:
-                  # app.config.js derives build metadata from git history.
+                  ref: ${{ needs.sync.outputs.sha }}
                   fetch-depth: 0
 
             - name: Install pnpm
@@ -75,32 +144,48 @@ jobs:
               run: |
                   mkdir -p dist
                   find packages/happy-app/android -name '*.apk' -path '*release*' -exec cp {} dist/ \;
+                  # Name the artifact after the version so downloads are identifiable.
+                  for f in dist/*.apk; do
+                      [ -e "$f" ] || continue
+                      mv "$f" "dist/happy-${{ needs.sync.outputs.version }}-${APP_ENV}-$(basename "$f")"
+                  done
                   ls -la dist
                   echo "count=$(find dist -name '*.apk' | wc -l)" >> "$GITHUB_OUTPUT"
-                  echo "date=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
 
             - name: Fail if no APK produced
               if: steps.collect.outputs.count == '0'
-              run: echo "::error::Gradle reported success but produced no APK" && exit 1
+              run: echo "::error::Gradle succeeded but produced no APK" && exit 1
 
             - name: Upload artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: happy-android-${{ env.APP_ENV }}-${{ github.sha }}
+                  name: happy-android-${{ needs.sync.outputs.version }}
                   path: dist/*.apk
                   retention-days: 90
                   if-no-files-found: error
 
-            - name: Publish rolling release
-              if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+            - name: Publish GitHub Release
               env:
-                  GH_TOKEN: ${{ github.token }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  TAG="apk-${{ steps.collect.outputs.date }}"
-                  gh release delete "$TAG" --yes --cleanup-tag || true
-                  gh release create "$TAG" dist/*.apk \
-                    --title "Android APK ${{ steps.collect.outputs.date }}" \
-                    --notes "Unsigned \`${APP_ENV}\` APK built from \`${GITHUB_SHA}\`.
+                  gh release create "${{ needs.sync.outputs.tag }}" dist/*.apk \
+                    --title "Happy ${{ needs.sync.outputs.version }} (${{ needs.sync.outputs.short_sha }})" \
+                    --notes "Unsigned \`${APP_ENV}\` Android APK.
 
-                  Debug-signed by Gradle -- uninstall any Play Store build before installing (signature mismatch).
-                  Push notifications use the upstream Firebase project; deep links still point at \`app.happy.engineering\`."
+                  | | |
+                  |---|---|
+                  | app version | \`${{ needs.sync.outputs.version }}\` |
+                  | upstream commit | [\`${{ needs.sync.outputs.short_sha }}\`](https://github.com/slopus/happy/commit/${{ needs.sync.outputs.short_sha }}) |
+                  | built from | \`${{ needs.sync.outputs.sha }}\` |
+
+                  **Install:** download the \`.apk\` below and sideload it.
+
+                  Debug-signed by Gradle, so uninstall any Play Store build first (signature mismatch).
+                  Push notifications use the upstream Firebase project, and deep links still point at \`app.happy.engineering\`." \
+                    || gh release upload "${{ needs.sync.outputs.tag }}" dist/*.apk --clobber
+
+            - name: Summary
+              run: |
+                  echo "### APK published" >> "$GITHUB_STEP_SUMMARY"
+                  echo "Release: \`${{ needs.sync.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+                  ls dist >> "$GITHUB_STEP_SUMMARY"
