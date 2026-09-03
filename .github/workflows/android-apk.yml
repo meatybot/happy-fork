@@ -109,23 +109,16 @@ jobs:
             # every phone made since ~2017; x86/x86_64 are emulator-only.
             ANDROID_ABI: arm64-v8a
         steps:
-            # Must run before checkout: this mounts an LVM volume over
-            # $GITHUB_WORKSPACE, so anything already there becomes invisible.
-            # It pools the unused root free space with the 14GB temp disk.
-            # remove-android is deliberately false -- the Android SDK is needed.
-            # root-reserve-mb is generous because the SDK, JDK, pnpm store and
-            # apt packages all land on / rather than in the workspace mount.
-            - name: Maximize build space
-              uses: easimon/maximize-build-space@master
-              with:
-                  root-reserve-mb: 20480
-                  temp-reserve-mb: 256
-                  swap-size-mb: 1024
-                  remove-dotnet: 'true'
-                  remove-haskell: 'true'
-                  remove-codeql: 'true'
-                  remove-docker-images: 'true'
-                  remove-android: 'false'
+            # NOTE: easimon/maximize-build-space was tried here and made things
+            # WORSE on this runner image. It assumes the old 84G VM with a
+            # separate 14G /mnt temp disk; this runner is a 145G single volume
+            # with 87G already free and no /mnt. The action packed root to
+            # 100% (256M left) to build a 92G workspace LV, and Setup Android
+            # SDK then died unzipping the emulator into $ANDROID_HOME on root.
+            # There is ample space here -- the real fix is not downloading the
+            # ~9G emulator we never use.
+            - name: Show disk before build
+              run: df -h / /mnt 2>/dev/null || df -h /
 
             - name: Checkout merged commit
               uses: actions/checkout@v4
@@ -148,8 +141,14 @@ jobs:
                   distribution: temurin
                   java-version: '17'
 
+            # `packages: ''` skips the default 'tools platform-tools' install.
+            # The legacy 'tools' package pulls the ~9G Android Emulator, which a
+            # headless APK build never runs. Gradle resolves the platform and
+            # build-tools it needs on its own.
             - name: Setup Android SDK
               uses: android-actions/setup-android@v3
+              with:
+                  packages: ''
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
