@@ -20,6 +20,24 @@ Use Claude Code or Codex from anywhere with end-to-end encryption.
 
 </div>
 
+> ### 🔱 This is a fork
+>
+> Downstream fork of **[slopus/happy](https://github.com/slopus/happy)** — all credit for the
+> upstream project goes to its authors. Licensed MIT, same as upstream.
+>
+> **What this fork adds:** a [fortnightly GitHub Actions workflow](.github/workflows/android-apk.yml)
+> that builds an unsigned Android APK with `expo prebuild` + Gradle, so the app can be installed
+> without Google Play and without an EAS account. Built APKs are published to
+> [this repo's Releases](../../releases).
+>
+> **Caveats:** APKs are debug-signed, so uninstall any Play Store build before installing
+> (signature mismatch). Push notifications still use the upstream Firebase project, and deep
+> links still point at `app.happy.engineering`.
+>
+> This repository is intentionally standalone rather than a GitHub fork, so its issues,
+> pull requests, and Actions are independent of upstream. Sync with
+> `git remote add upstream https://github.com/slopus/happy.git && git pull upstream main`.
+
 <img width="5178" height="2364" alt="github" src="/.github/header.png" />
 
 
