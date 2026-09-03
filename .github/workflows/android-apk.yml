@@ -109,19 +109,23 @@ jobs:
             # every phone made since ~2017; x86/x86_64 are emulator-only.
             ANDROID_ABI: arm64-v8a
         steps:
-            # Must run before checkout: reclaims ~25GB by deleting preinstalled
-            # toolchains. `android: false` is deliberate -- this build needs the
-            # Android SDK, and the default (true) would delete it.
-            - name: Free disk space
-              uses: jlumbroso/free-disk-space@main
+            # Must run before checkout: this mounts an LVM volume over
+            # $GITHUB_WORKSPACE, so anything already there becomes invisible.
+            # It pools the unused root free space with the 14GB temp disk.
+            # remove-android is deliberately false -- the Android SDK is needed.
+            # root-reserve-mb is generous because the SDK, JDK, pnpm store and
+            # apt packages all land on / rather than in the workspace mount.
+            - name: Maximize build space
+              uses: easimon/maximize-build-space@master
               with:
-                  tool-cache: false
-                  android: false
-                  dotnet: true
-                  haskell: true
-                  large-packages: true
-                  docker-images: true
-                  swap-storage: true
+                  root-reserve-mb: 20480
+                  temp-reserve-mb: 256
+                  swap-size-mb: 1024
+                  remove-dotnet: 'true'
+                  remove-haskell: 'true'
+                  remove-codeql: 'true'
+                  remove-docker-images: 'true'
+                  remove-android: 'false'
 
             - name: Checkout merged commit
               uses: actions/checkout@v4
