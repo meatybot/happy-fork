@@ -103,7 +103,26 @@ jobs:
         env:
             SHARP_IGNORE_GLOBAL_LIBVIPS: '1'
             SKIP_HAPPY_WIRE_BUILD: '1'
+            # Single ABI. Building all four (armeabi-v7a, arm64-v8a, x86,
+            # x86_64) compiles a full RN/Hermes native toolchain per arch and
+            # is what exhausted the runner disk. arm64-v8a covers essentially
+            # every phone made since ~2017; x86/x86_64 are emulator-only.
+            ANDROID_ABI: arm64-v8a
         steps:
+            # Must run before checkout: reclaims ~25GB by deleting preinstalled
+            # toolchains. `android: false` is deliberate -- this build needs the
+            # Android SDK, and the default (true) would delete it.
+            - name: Free disk space
+              uses: jlumbroso/free-disk-space@main
+              with:
+                  tool-cache: false
+                  android: false
+                  dotnet: true
+                  haskell: true
+                  large-packages: true
+                  docker-images: true
+                  swap-storage: true
+
             - name: Checkout merged commit
               uses: actions/checkout@v4
               with:
@@ -137,7 +156,11 @@ jobs:
 
             - name: Gradle assembleRelease
               working-directory: packages/happy-app/android
-              run: ./gradlew assembleRelease --no-daemon --stacktrace
+              run: |
+                  df -h / | tail -1
+                  ./gradlew assembleRelease --no-daemon --stacktrace \
+                      -PreactNativeArchitectures="$ANDROID_ABI"
+                  df -h / | tail -1
 
             - name: Collect APKs
               id: collect

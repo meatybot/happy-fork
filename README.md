@@ -33,11 +33,12 @@ Use Claude Code or Codex from anywhere with end-to-end encryption.
 > Releases are tagged `v<appVersion>-<upstreamShortSha>`, so each APK maps to an exact
 > upstream commit. You can also trigger it by hand from the Actions tab.
 >
-> **Caveats:** APKs are debug-signed, so uninstall any Play Store build before installing
-> (signature mismatch). Push notifications still use the upstream Firebase project, and deep
-> links still point at `app.happy.engineering`. The auto-merge uses `-X ours`, so if upstream
-> edits a file this fork also changed (e.g. this README), upstream's version of that hunk is
-> dropped — merge those by hand when it matters.
+> **Caveats:** APKs are **arm64-v8a only** (every phone since roughly 2017; not x86 emulators)
+> and debug-signed, so uninstall any Play Store build before installing (signature mismatch).
+> Push notifications still use the upstream Firebase project, and deep links still point at
+> `app.happy.engineering`. The auto-merge uses `-X ours`, so if upstream edits a file this fork
+> also changed (e.g. this README), upstream's version of that hunk is dropped — merge those by
+> hand when it matters.
 >
 > This repository is intentionally standalone rather than a GitHub fork, so its issues,
 > pull requests, and Actions are independent of upstream. Manual sync:
