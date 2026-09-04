@@ -99,10 +99,13 @@ jobs:
         needs: sync
         if: needs.sync.outputs.changed == 'true'
         runs-on: ubuntu-latest
-        timeout-minutes: 60
+        timeout-minutes: 90
         env:
             SHARP_IGNORE_GLOBAL_LIBVIPS: '1'
-            SKIP_HAPPY_WIRE_BUILD: '1'
+            # NOTE: do NOT set SKIP_HAPPY_WIRE_BUILD here. That flag belongs to
+            # the server image; the app's Metro bundle imports @slopus/happy-wire
+            # and needs its dist/ built, or createBundleReleaseJsAndAssets fails
+            # to resolve dist/index.cjs.
             # Single ABI. Building all four (armeabi-v7a, arm64-v8a, x86,
             # x86_64) compiles a full RN/Hermes native toolchain per arch and
             # is what exhausted the runner disk. arm64-v8a covers essentially
@@ -157,6 +160,13 @@ jobs:
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
+
+            # Belt and braces: postinstall builds this, but assert dist/ exists
+            # so a bundler resolve error can never be the first sign of trouble.
+            - name: Build @slopus/happy-wire
+              run: |
+                  pnpm --filter @slopus/happy-wire build
+                  test -f packages/happy-wire/dist/index.cjs
 
             - name: Expo prebuild (generate android/)
               working-directory: packages/happy-app
