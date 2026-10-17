@@ -60,6 +60,18 @@ jobs:
                   # Keep our workflow/README on top of upstream's history.
                   git merge --no-edit -X ours upstream/main || {
                       echo "::error::Merge conflict with upstream -- resolve locally"; exit 1; }
+                  # GITHUB_TOKEN can never push .github/workflows -- no
+                  # `permissions:` key grants it, so a new upstream workflow
+                  # file (e.g. expo-tailcat.yml) hard-fails the push. Restore
+                  # this fork's workflow dir verbatim and drop upstream's.
+                  # The directory is removed first: `git checkout` alone
+                  # leaves merge-added files in place.
+                  if ! git diff --quiet "$BEFORE" HEAD -- .github/workflows; then
+                      rm -rf .github/workflows
+                      git checkout "$BEFORE" -- .github/workflows
+                      git add -A .github/workflows
+                      git commit -q --no-verify -m 'ci: keep fork workflows (GITHUB_TOKEN cannot push workflow files)' || true
+                  fi
                   echo "BEFORE=$BEFORE" >> "$GITHUB_ENV"
 
             - name: Detect changes
