@@ -7,6 +7,8 @@ export interface SessionDisplayMachine {
     metadata?: {
         displayName?: string | null;
         host?: string | null;
+        /** `rig` for a Happy Agent machine; absent for a Happy CLI daemon. */
+        machineKind?: string | null;
     } | null;
 }
 
@@ -138,6 +140,9 @@ export function getSessionShortcutIdsInDisplayOrder(
     }
 
     const sessionIds: string[] = [];
+    for (const item of data) {
+        if (item.type === 'bots') sessionIds.push(...item.sessions.map((session) => session.id));
+    }
     const projectGroups = buildSessionProjectDisplayGroups(data, machines, unknownText);
     projectGroups.forEach((machineGroup) => {
         machineGroup.projects.forEach((item) => {

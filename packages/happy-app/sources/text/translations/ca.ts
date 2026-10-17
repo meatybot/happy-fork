@@ -1,4 +1,4 @@
-import type { TranslationStructure } from '../_default';
+import { en, type TranslationStructure } from '../_default';
 
 /**
  * Catalan plural helper function
@@ -65,6 +65,7 @@ export const ca: TranslationStructure = {
         fileViewer: 'Visualitzador de fitxers',
         loading: 'Carregant...',
         retry: 'Torna-ho a provar',
+        loadMore: 'Carrega més',
         delete: 'Elimina',
         optional: 'Opcional',
     },
@@ -137,6 +138,7 @@ export const ca: TranslationStructure = {
         termsOfService: 'Condicions del servei',
         eula: 'EULA',
         supportUs: 'Dona\'ns suport',
+        supportUnavailable: 'Les compres no estan disponibles ara mateix. Torna-ho a provar més tard.',
         supportUsSubtitlePro: 'Gràcies pel teu suport!',
         supportUsSubtitle: 'Dona suport al desenvolupament del projecte',
         scanQrCodeToAuthenticate: 'Escaneja el codi QR per autenticar-te',
@@ -216,6 +218,7 @@ export const ca: TranslationStructure = {
         flatList: 'Llista plana',
         groupByProject: 'Agrupa per projecte',
         appearanceSettings: 'Configuració d\'aparença',
+        worktreeTabs: ({ count }: { count: number }) => count === 1 ? '1 pestanya' : `${count} pestanyes`,
     },
 
     settingsFeatures: {
@@ -329,6 +332,9 @@ export const ca: TranslationStructure = {
         forkErrorMissingMetadata: 'Falten metadades de la sessió necessàries per bifurcar.',
         forkErrorGeneric: 'No s\'ha pogut bifurcar la sessió.',
         forkClaudeOnly: 'La bifurcació només està disponible per a sessions de Claude.',
+        archiveAction: 'Arxiva',
+        startingChat: 'Iniciant un xat nou…',
+        actionsTitle: 'Sessió',
     },
 
     commandPalette: {
@@ -336,6 +342,9 @@ export const ca: TranslationStructure = {
     },
 
     server: {
+        title: en.server.title,
+        serverUrlLabel: en.server.serverUrlLabel,
+        selfHostFooter: en.server.selfHostFooter,
         // Used by Server Configuration screen (app/(app)/server.tsx)
         serverConfiguration: 'Configuració del servidor',
         enterServerUrl: 'Introdueix una URL del servidor',
@@ -429,6 +438,7 @@ export const ca: TranslationStructure = {
 
     components: {
         emptyMainScreen: {
+            ...en.components.emptyMainScreen,
             // Used by EmptyMainScreen component
             readyToCode: 'Llest per programar?',
             installCli: 'Instal·la el Happy CLI',
@@ -552,6 +562,9 @@ export const ca: TranslationStructure = {
         hideArchived: 'Amaga arxivades',
         newSession: 'Nova sessió',
         projects: "Projectes",
+        bots: 'Bots',
+        showAllWorkspaces: ({ count }: { count: number }) => `Mostra els ${count} espais de treball`,
+        showFewerWorkspaces: 'Mostra\u2019n menys',
     },
 
     zen: {
@@ -564,14 +577,14 @@ export const ca: TranslationStructure = {
     },
 
     toolGroup: {
-        editedFiles: ({ count }: { count: number }) => count === 1 ? 'S\'ha editat 1 fitxer' : `S'han editat ${count} fitxers`,
-        readFiles: ({ count }: { count: number }) => count === 1 ? 'S\'ha llegit 1 fitxer' : `S'han llegit ${count} fitxers`,
-        ranCommands: ({ count }: { count: number }) => count === 1 ? 'S\'ha executat 1 comanda' : `S'han executat ${count} comandes`,
-        searched: ({ count }: { count: number }) => count === 1 ? 'S\'ha cercat 1 vegada' : `S'ha cercat ${count} vegades`,
-        fetchedUrls: ({ count }: { count: number }) => count === 1 ? 'S\'ha obtingut 1 URL' : `S'han obtingut ${count} URLs`,
-        ranTasks: ({ count }: { count: number }) => count === 1 ? 'S\'ha executat 1 tasca' : `S'han executat ${count} tasques`,
-        usedTools: ({ count }: { count: number }) => count === 1 ? 'S\'ha usat 1 eina' : `S'han usat ${count} eines`,
+        ran: 'Executat',
+        edited: 'Editat',
+        read: 'Llegit',
+        searched: 'Cerca',
+        fetched: 'Obtingut',
+        ranTask: 'Tasca executada',
         workedFor: ({ duration }: { duration: string }) => `Worked ${duration}`,
+        hide: 'Amaga',
     },
 
     tools: {
@@ -717,7 +730,7 @@ export const ca: TranslationStructure = {
         },
         // Bring your own agent
         byoTitle: 'Porta el teu propi agent',
-        byoDescription: 'Utilitza el teu propi agent d\'ElevenLabs en lloc del predeterminat de Happy. No cal subscripció — connecta directament amb el teu propi compte d\'ElevenLabs. El teu agent ha de definir dues eines de client: messageClaudeCode (envia text a l\'agent de codi) i processPermissionRequest (permet o denega l\'ús d\'eines). Rep el context de la sessió a través de la variable dinàmica {{initialConversationContext}}.',
+        byoDescription: 'Utilitza el teu propi agent d\'ElevenLabs en lloc del predeterminat de Happy. No cal subscripció — connecta directament amb el teu propi compte d\'ElevenLabs. El teu agent ha de definir dues eines de client: sendMessageToSession (envia text a l\'agent de codi) i processPermissionRequest (permet o denega l\'ús d\'eines). Rep el context de la sessió a través de la variable dinàmica {{initialConversationContext}}.',
         customAgentId: 'ElevenLabs Agent ID',
         customAgentIdNotSet: 'No configurat',
         customAgentIdDescription: 'Introdueix el teu ElevenLabs Agent ID. Deixa-ho buit per utilitzar el predeterminat de Happy.',
@@ -725,7 +738,7 @@ export const ca: TranslationStructure = {
         bypassToken: 'Connexió directa',
         bypassTokenSubtitle: 'Omet el servidor de Happy, connecta directament a ElevenLabs',
         promptGuideTitle: 'Guia de prompt de l\'agent',
-        promptGuideDescription: 'El teu agent d\'ElevenLabs necessita:\n\n• Eina: messageClaudeCode — paràmetre: message (string). Envia un missatge a la sessió de codi activa.\n• Eina: processPermissionRequest — paràmetre: decision ("allow" o "deny"). Aprova o denega un permís d\'eina pendent.\n• Variable dinàmica: {{initialConversationContext}} — rep l\'historial i el context de la sessió en iniciar.\n\nL\'agent actua com a pont de veu entre l\'usuari i els agents de codi. Ha de ser concís, respondre només quan se li parla i informar quan un agent de codi acaba la feina.',
+        promptGuideDescription: 'El teu agent d\'ElevenLabs necessita:\n\n• Eina: sendMessageToSession — paràmetres: sessionId (string), message (string). Envia un missatge a la sessió de codi especificada.\n• Eina: processPermissionRequest — paràmetres: requestId (string), decision ("allow" o "deny"). Aprova o denega un permís d\'eina pendent.\n• Variable dinàmica: {{initialConversationContext}} — rep l\'historial i el context de la sessió en iniciar.\n\nL\'agent actua com a pont de veu entre l\'usuari i els agents de codi. Ha de ser concís, respondre només quan se li parla i informar quan un agent de codi acaba la feina.',
         usageTitle: 'Ús (últims 30 dies)',
         usageFooter: 'Temps de veu utilitzat en els últims 30 dies. Nivell gratuït: 20 min. Subscrit: 5 hores. Màx. 100 converses al mes.',
         usageLabel: 'Temps de veu',
@@ -741,7 +754,7 @@ export const ca: TranslationStructure = {
         status: 'Estat',
         statusActive: 'Actiu',
         statusNotAuthenticated: 'No autenticat',
-        anonymousId: 'ID anònim',
+        anonymousId: 'ID d\'analítiques',
         publicId: 'ID públic',
         notAvailable: 'No disponible',
         linkNewDevice: 'Enllaça un nou dispositiu',
@@ -760,10 +773,10 @@ export const ca: TranslationStructure = {
         secretKeyCopied: 'Clau secreta copiada al porta-retalls. Desa-la en un lloc segur!',
         secretKeyCopyFailed: 'Ha fallat copiar la clau secreta',
         privacy: 'Privadesa',
-        privacyDescription: 'Ajuda a millorar l\'aplicació compartint dades d\'ús anònimes. No es recopila informació personal.',
+        privacyDescription: 'Comparteix dades d\'ús, com ara les funcions que fas servir i el teu tipus de dispositiu, per ajudar-nos a millorar Happy. Mai els teus missatges ni el teu codi.',
         analytics: 'Analítiques',
         analyticsDisabled: 'No es comparteixen dades',
-        analyticsEnabled: 'Es comparteixen dades d\'ús anònimes',
+        analyticsEnabled: 'Es comparteixen dades d\'ús',
         dangerZone: 'Zona de perill',
         logout: 'Tanca la sessió',
         logoutSubtitle: 'Tanca la sessió i esborra les dades locals',
@@ -860,6 +873,14 @@ export const ca: TranslationStructure = {
         friends: 'Amics',
     },
 
+    onboarding: {
+        ...en.onboarding,
+    },
+
+    troubleshoot: {
+        ...en.troubleshoot,
+    },
+
     welcome: {
         // Main welcome screen for unauthenticated users
         title: 'Client mòbil de Codex i Claude Code',
@@ -924,6 +945,9 @@ export const ca: TranslationStructure = {
         unknownEvent: 'Esdeveniment desconegut',
         usageLimitUntil: ({ time }: { time: string }) => `Límit d'ús assolit fins a ${time}`,
         sentAsGoal: 'Sent as goal',
+        sendsAfterThisTurn: 'Sends after this turn',
+        sending: 'Sending…',
+        sendFailed: ({ reason }: { reason: string }) => `No enviat: ${reason}`,
         unknownTime: 'temps desconegut',
     },
 
@@ -1068,6 +1092,11 @@ export const ca: TranslationStructure = {
             : `No s'han pogut pujar ${count} imatges i no s'han enviat.`,
         notSupportedTitle: 'Imatges no compatibles',
         notSupportedMessage: 'Aquest agent no admet fitxers adjunts d\'imatge. Les imatges no s\'han enviat.',
+        attachTitle: 'Afegeix una imatge',
+        pasteFromClipboard: 'Enganxa del porta-retalls',
+        chooseFromLibrary: 'Biblioteca de fotos',
+        nothingToPasteTitle: 'Res per enganxar',
+        nothingToPasteMessage: 'Copia una imatge primer i torna-ho a provar.',
     },
 
     feed: {

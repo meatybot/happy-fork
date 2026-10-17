@@ -152,6 +152,15 @@ describe('intraline', () => {
         ]);
         expect(emphasis.size).toBe(0);
     });
+
+    it('stops optional emphasis after an expired deadline', () => {
+        const emphasis = computeEmphasis([
+            { type: 'del', text: 'const value = 1;' },
+            { type: 'add', text: 'const value = 2;' },
+        ], Date.now() - 1);
+
+        expect(emphasis.size).toBe(0);
+    });
 });
 
 describe('highlightLines', () => {
@@ -308,15 +317,20 @@ describe('buildDiffFromPatch', () => {
         expect(rows.every((r) => r.spans.every((s) => s.k === 'plain' && s.e === 0))).toBe(true);
     });
 
-    it('still highlights when options carry undefined fields', () => {
-        // Regression: a spread merge let `{ syntax: undefined }` overwrite the
-        // default and silently disabled highlighting for every hook caller.
+    it('keeps defaults when options carry undefined fields', () => {
+        // Regression: a spread merge let `{ intraline: undefined }` overwrite
+        // the default and silently disabled word diffing for every hook caller.
+        // (Syntax is default-off for now, so intraline is the default-on field
+        // this guards; explicit `syntax: true` still opts in below.)
         clearDiffCache();
         const patch = ['--- a/a.ts', '+++ b/a.ts', '@@ -1 +1 @@', '-const a = 1;', '+const a = 2;'].join('\n');
         const file = buildDiffFromPatch(patch, { syntax: undefined, intraline: undefined, contextLines: undefined }).files[0];
         const rows = lineRows(file.rows);
-        expect(rows.some((r) => r.spans.some((s) => s.k === 'keyword'))).toBe(true);
         expect(rows.some((r) => r.spans.some((s) => s.e !== 0))).toBe(true);
+
+        clearDiffCache();
+        const highlighted = buildDiffFromPatch(patch, { syntax: true }).files[0];
+        expect(lineRows(highlighted.rows).some((r) => r.spans.some((s) => s.k === 'keyword'))).toBe(true);
     });
 
     it('tolerates junk input', () => {
@@ -347,6 +361,92 @@ describe('buildDiffFromContents', () => {
     it('reports no rows when nothing changed', () => {
         const doc = buildDiffFromContents('same.ts', 'a\nb\n', 'a\nb\n');
         expect(doc.files[0].rows).toEqual([{ kind: 'message', key: 'empty', code: 'empty' }]);
+    });
+
+    it('filters whitespace-only content changes without normalizing rendered text', () => {
+        const oldText = '  keep\nold value\n';
+        const newText = 'keep  \nnew value\n';
+        const file = buildDiffFromContents('sample.txt', oldText, newText, {
+            contextLines: 1,
+            ignoreWhitespace: true,
+        }).files[0];
+        const rows = lineRows(file.rows);
+
+        expect(rows.map((row) => row.type)).toEqual(['ctx', 'del', 'add']);
+        expect(rows[0].text).toBe('keep  ');
+        expect(rows[0].spans.map((span) => span.t).join('')).toBe('keep  ');
+        expect(rows.some((row) => row.text === '  keep')).toBe(false);
+    });
+
+    it('separates content cache entries by whitespace and context options', () => {
+        clearDiffCache();
+        const oldText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
+        const newText = oldText.replace('line 6', 'line six');
+
+        const narrow = buildDiffFromContents('sample.txt', oldText, newText, { contextLines: 1 });
+        const wide = buildDiffFromContents('sample.txt', oldText, newText, { contextLines: 5 });
+        expect(wide).not.toBe(narrow);
+        expect(lineRows(wide.files[0].rows).length).toBeGreaterThan(lineRows(narrow.files[0].rows).length);
+        expect(buildDiffFromContents('sample.txt', oldText, newText, { contextLines: 5 })).toBe(wide);
+
+        const whitespaceOld = 'before\nchanged\nafter\n';
+        const whitespaceNew = 'before\n  changed  \nafter\n';
+        const normal = buildDiffFromContents('whitespace.txt', whitespaceOld, whitespaceNew, { ignoreWhitespace: false });
+        const ignored = buildDiffFromContents('whitespace.txt', whitespaceOld, whitespaceNew, { ignoreWhitespace: true });
+        expect(ignored).not.toBe(normal);
+        expect(buildDiffFromContents('whitespace.txt', whitespaceOld, whitespaceNew, { ignoreWhitespace: true })).toBe(ignored);
+        expect(lineRows(ignored.files[0].rows)).toHaveLength(0);
+    });
+
+    it('returns an uncached error when an optional diff budget aborts a change', () => {
+        clearDiffCache();
+        const diffBudget = { timeoutMs: 50, maxEditLength: 0 };
+        const first = buildDiffFromContents('budget.txt', 'old\n', 'new\n', { diffBudget });
+        const second = buildDiffFromContents('budget.txt', 'old\n', 'new\n', { diffBudget });
+
+        expect(first.error).toBe('Diff is too large to render on this device.');
+        expect(first.files).toEqual([]);
+        expect(second.error).toBe(first.error);
+        expect(second).not.toBe(first);
+    });
+
+    it('allows equal whitespace-filtered contents within a strict budget', () => {
+        const doc = buildDiffFromContents(
+            'budget-whitespace.txt',
+            'before\nchanged\nafter\n',
+            'before\n  changed  \nafter\n',
+            { ignoreWhitespace: true, diffBudget: { timeoutMs: 50, maxEditLength: 0 } },
+        );
+
+        expect(doc.error).toBeUndefined();
+        expect(lineRows(doc.files[0].rows)).toHaveLength(0);
+    });
+
+    it('keeps budgeted and unbudgeted content documents in separate cache entries', () => {
+        clearDiffCache();
+        const oldText = 'before\nold\nafter\n';
+        const newText = 'before\nnew\nafter\n';
+        const unbudgeted = buildDiffFromContents('budget-cache.txt', oldText, newText);
+        const budgeted = buildDiffFromContents('budget-cache.txt', oldText, newText, {
+            diffBudget: { timeoutMs: 50, maxEditLength: 2000 },
+        });
+
+        expect(budgeted.error).toBeUndefined();
+        expect(budgeted).not.toBe(unbudgeted);
+        expect(buildDiffFromContents('budget-cache.txt', oldText, newText, {
+            diffBudget: { timeoutMs: 50, maxEditLength: 2000 },
+        })).toBe(budgeted);
+    });
+
+    it('builds a large one-sided file without spending the two-sided edit budget', () => {
+        const newText = Array.from({ length: 3000 }, (_, i) => `line ${i}`).join('\n');
+        const doc = buildDiffFromContents('large-added.txt', '', newText, {
+            diffBudget: { timeoutMs: 50, maxEditLength: 0 },
+        });
+
+        expect(doc.error).toBeUndefined();
+        expect(doc.files[0].kind).toBe('added');
+        expect(doc.files[0].additions).toBe(3000);
     });
 });
 

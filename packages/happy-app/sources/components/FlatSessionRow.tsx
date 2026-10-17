@@ -9,11 +9,8 @@ import { Avatar } from './Avatar';
 import { StatusDot } from './StatusDot';
 import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
 import { SessionShortcutHintBadge } from './ShortcutHints';
-import { useNavigateToSession } from '@/hooks/useNavigateToSession';
-import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
-import { useHappyAction } from '@/hooks/useHappyAction';
-import { HappyError } from '@/utils/errors';
-import { sessionKill } from '@/sync/ops';
+import { useSessionPressHandlers } from '@/hooks/useNavigateToSession';
+import { useSessionActionAlert, useSessionArchiveAction } from '@/hooks/useSessionQuickActions';
 import type { FlatSessionRowData } from '@/utils/flatSessionList';
 import { formatSessionListTimestamp } from '@/utils/sessionListTimestamp';
 import type { Theme } from '@/theme';
@@ -28,7 +25,7 @@ const AVATAR_SIZE = 60;
 const ROW_PADDING_LEFT = 16;
 const AVATAR_GAP = 12;
 const TOP_RIGHT_DOT_SIZE = 20;
-const TOP_RIGHT_SLOT_WIDTH = 56;
+const TOP_RIGHT_SLOT_MIN_WIDTH = 56;
 const UNREAD_DOT_CLEAR_GRACE_MS = 350;
 
 /**
@@ -57,7 +54,7 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
     const { session, projectName, workspaceName } = row;
     const styles = stylesheet;
     const { theme } = useUnistyles();
-    const navigateToSession = useNavigateToSession();
+    const sessionPressHandlers = useSessionPressHandlers(session.id);
     const swipeableRef = React.useRef<Swipeable | null>(null);
     const swipeEnabled = Platform.OS !== 'web';
     const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
@@ -69,8 +66,8 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
     // fades.
     const faded = !!archived || session.machineOffline;
 
-    // SessionView clears the real unread state as soon as the destination
-    // mounts. Keep only the row's visual badge around long enough for the
+    // SessionView clears the real unread state when the destination gains
+    // focus. Keep only the row's visual badge around long enough for the
     // navigation transition to cover it, instead of briefly exposing the
     // timestamp underneath. Read semantics remain immediate.
     const [showUnreadDot, setShowUnreadDot] = React.useState(session.hasUnread);
@@ -105,21 +102,14 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
         [session.lastActivityAt],
     );
 
-    const [archiving, performArchive] = useHappyAction(async () => {
-        const result = await sessionKill(session.id);
-        if (!result.success) {
-            throw new HappyError(result.message || t('sessionInfo.failedToArchiveSession'), false);
-        }
-    });
+    // The same archive the row's own menu runs, so a swipe drops the row from
+    // the list on the release exactly as pressing Archive does.
+    const { archiveSession, archivingSession: archiving } = useSessionArchiveAction(session.id);
 
     const handleArchive = React.useCallback(() => {
         swipeableRef.current?.close();
-        performArchive();
-    }, [performArchive]);
-
-    const handlePress = React.useCallback(() => {
-        navigateToSession(session.id);
-    }, [navigateToSession, session.id]);
+        archiveSession();
+    }, [archiveSession]);
 
     const handleContextMenu = React.useCallback((event: any) => {
         event.preventDefault?.();
@@ -141,18 +131,19 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
     const content = (
         <Pressable
             style={[styles.row, selected && styles.rowSelected]}
-            onPress={handlePress}
+            {...sessionPressHandlers}
             {...menuProps}
         >
             <View style={[styles.avatar, faded && styles.avatarFaded]}>
                 <Avatar
+                    bot={!!session.botId}
                     id={session.avatarId}
                     size={AVATAR_SIZE}
                     monochrome={faded}
                     flavor={session.flavor}
                     clientId={session.clientId}
-                    imageUrl={session.projectAvatarUri}
-                    thumbhash={session.projectAvatarThumbhash}
+                    imageUrl={session.avatarUri}
+                    thumbhash={session.avatarThumbhash}
                     badgeLocation="sessionList"
                 />
             </View>
@@ -186,15 +177,24 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
                         accessibilityRole={topRightAccessibilityLabel ? 'text' : undefined}
                         accessibilityLabel={topRightAccessibilityLabel}
                     >
-                        {presentation.topRight.type === 'dot' ? (
-                            <StatusDot
-                                color={presentation.topRight.color}
-                                size={TOP_RIGHT_DOT_SIZE}
-                            />
-                        ) : (
-                            <Text style={styles.timestamp} numberOfLines={1}>
-                                {timestamp}
-                            </Text>
+                        <Text
+                            style={[
+                                styles.timestamp,
+                                presentation.topRight.type === 'dot' && styles.timestampHidden,
+                            ]}
+                            numberOfLines={1}
+                            accessibilityElementsHidden={presentation.topRight.type === 'dot'}
+                            importantForAccessibility={presentation.topRight.type === 'dot' ? 'no-hide-descendants' : 'auto'}
+                        >
+                            {timestamp}
+                        </Text>
+                        {presentation.topRight.type === 'dot' && (
+                            <View style={styles.statusDotOverlay}>
+                                <StatusDot
+                                    color={presentation.topRight.color}
+                                    size={TOP_RIGHT_DOT_SIZE}
+                                />
+                            </View>
                         )}
                     </View>
                 </View>
@@ -332,12 +332,12 @@ const stylesheet = StyleSheet.create((theme) => ({
         flexShrink: 0,
         marginLeft: 8,
     },
-    // The dot and time share a Telegram-like right column, so changing status
-    // never makes the title jump horizontally. It is only as wide as the
-    // longest timestamp; the dot occupies that same slot instead of reserving
-    // a second lane.
+    // A fixed 56dp slot clipped "12:55 AM" in the native 216dpi capture
+    // (only 75.6 backing pixels). Let the actual localized stamp size the
+    // non-shrinking slot. Keep that same Text mounted while the dot is shown
+    // so clearing unread status cannot resize the slot or jump the title.
     topRightStatus: {
-        width: TOP_RIGHT_SLOT_WIDTH,
+        minWidth: TOP_RIGHT_SLOT_MIN_WIDTH,
         height: 22,
         flexShrink: 0,
         marginLeft: 8,
@@ -351,6 +351,18 @@ const stylesheet = StyleSheet.create((theme) => ({
         fontVariant: ['tabular-nums'],
         textAlign: 'right',
         ...Typography.default('regular'),
+    },
+    timestampHidden: {
+        opacity: 0,
+    },
+    statusDotOverlay: {
+        // An intentional overlay: the timestamp owns width in normal flow;
+        // the dot shares its right edge without reserving a second lane.
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        right: 0,
+        justifyContent: 'center',
     },
     project: {
         fontSize: 15,

@@ -3,6 +3,25 @@ import { AgentGoalStatusSchema, AgentStateSchema, MachineMetadataSchema, Metadat
 import { rigMetadataFixture } from './__testdata__/rigMetadata';
 
 describe('MetadataSchema', () => {
+    it('reads bot identity without requiring a project and retains additive fields', () => {
+        const bot = { id: 'bot-1', name: 'Assistant', username: 'assistant', workspaceId: 'bot-workspace', orderKey: '1', futureField: true };
+        const parsed = MetadataSchema.parse({ ...rigMetadataFixture, bot, project: undefined, workspace: undefined });
+        expect(parsed.bot).toEqual(bot);
+        expect(parsed.project).toBeUndefined();
+        expect(MetadataSchema.parse(rigMetadataFixture).bot).toBeUndefined();
+    });
+
+    it('reads the task depth and drops a bad one without losing the metadata', () => {
+        expect(MetadataSchema.parse({ ...rigMetadataFixture, depth: 1 }).depth).toBe(1);
+        expect(MetadataSchema.parse(rigMetadataFixture).depth).toBeUndefined();
+        for (const depth of [-1, 1.5, '2', null]) {
+            const parsed = MetadataSchema.safeParse({ ...rigMetadataFixture, depth });
+            expect(parsed.success).toBe(true);
+            expect(parsed.data?.depth).toBeUndefined();
+            expect(parsed.data?.path).toBe(rigMetadataFixture.path);
+        }
+    });
+
     it('preserves archive lifecycle metadata', () => {
         const metadata = MetadataSchema.parse({
             path: '/tmp/project',

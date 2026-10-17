@@ -97,6 +97,16 @@ describe('Rig machine session creation', () => {
         expect(creation?.defaultEffortForModel('claude:shared-model')).toBe('max');
     });
 
+    it('offers bots only when the daemon says it can make them', () => {
+        // An older Happy Agent publishes no such capability, and must not be
+        // asked for a bot it does not know how to make.
+        expect(getRigMachineSessionCreation(rigMachine)?.supportsBots).toBe(false);
+        expect(getRigMachineSessionCreation({
+            ...rigMachine,
+            capabilities: { ...rigMachine.capabilities, bots: true },
+        } as MachineMetadata)?.supportsBots).toBe(true);
+    });
+
     it('finds an online Rig machine for automatic composer selection', () => {
         const machine = (id: string, active: boolean, metadata: MachineMetadata): Machine => ({
             id,
@@ -120,6 +130,35 @@ describe('Rig machine session creation', () => {
             machine('regular', true, regularMetadata),
             machine('offline-rig', false, rigMachine),
         ])).toBeNull();
+    });
+
+    it.each([true, false])('puts Astra first in dock options without changing defaults (published: %s)', (publishedDefault) => {
+        const metadata = {
+            ...rigMachine,
+            defaults: publishedDefault ? { providerId: 'codex', modelId: 'openai/gpt-5.6-sol' } : undefined,
+            models: [
+                { providerId: 'codex', id: 'openai/gpt-5.6-sol', thinkingLevels: ['medium'] },
+                { providerId: 'claude', id: 'anthropic/opus-5', thinkingLevels: ['high'] },
+                {
+                    providerId: 'codex', id: 'openai/gpt-6-astra', name: 'GPT-6 Astra',
+                    thinkingLevels: ['medium', 'high', 'ultra'], defaultThinkingLevel: 'high',
+                },
+            ],
+        } as unknown as MachineMetadata;
+        const creation = getRigMachineSessionCreation(metadata);
+
+        expect(creation?.models.map((model) => model.key)).toEqual([
+            'codex:openai/gpt-6-astra',
+            'codex:openai/gpt-5.6-sol',
+            'claude:anthropic/opus-5',
+        ]);
+        expect(creation?.defaultModelKey).toBe('codex:openai/gpt-5.6-sol');
+        expect(creation?.effortsForModel('codex:openai/gpt-6-astra')).toEqual(['medium', 'high', 'ultra']);
+        expect(buildRigSpawnConfiguration(metadata, {
+            directory: '/Users/rig/project',
+            clientRequestId: 'astra-picker',
+            modelKey: creation?.models[0].key,
+        })).toMatchObject({ providerId: 'codex', modelId: 'openai/gpt-6-astra', effort: 'high' });
     });
 
     it("builds Rig's exact provider-qualified spawn payload", () => {

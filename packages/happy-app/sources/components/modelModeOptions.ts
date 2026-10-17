@@ -1,8 +1,9 @@
 import type { Metadata } from '@/sync/storageTypes';
 import { hackModes } from '@/sync/modeHacks';
 import { sortPermissionModes } from '@/utils/permissionModeLabels';
+import { sortRigModelsForPicker } from '@/utils/rigModelPickerOrder';
 import { compareVersionsWithPrerelease, isWellFormedVersion } from '@/utils/versionUtils';
-import { CLI_VERSION_WITH_AUTO, getCodeAgentDefaults } from '@/sync/agentDefaults';
+import { CLI_VERSION_WITH_AUTO, getCodeAgentDefaults, normalizeAgentKey, retireModelMode } from '@/sync/agentDefaults';
 export { CLI_VERSION_WITH_AUTO } from '@/sync/agentDefaults';
 import {
     getRigCurrentModel,
@@ -36,6 +37,35 @@ export type ModelMode = ModeOption & {
     defaultThinkingLevel?: string | null;
     unavailable?: boolean;
 };
+
+export type ModelModeProviderGroup = {
+    key: string;
+    title: string | null;
+    models: ModelMode[];
+};
+
+/**
+ * Group models without sorting them. Provider groups keep the order in which
+ * the backend first publishes each provider, and rows keep their wire order.
+ */
+export function groupModelModesByProvider(models: readonly ModelMode[]): ModelModeProviderGroup[] {
+    const groups = new Map<string, ModelModeProviderGroup>();
+    for (const model of models) {
+        const providerId = model.providerId?.trim() || null;
+        const key = providerId ?? '__models__';
+        let group = groups.get(key);
+        if (!group) {
+            group = {
+                key,
+                title: model.providerName?.trim() || providerId,
+                models: [],
+            };
+            groups.set(key, group);
+        }
+        group.models.push(model);
+    }
+    return [...groups.values()];
+}
 
 export type EffortLevel = ModeOption;
 export type PermissionModeKey = string;
@@ -132,46 +162,74 @@ export function getGeminiPermissionModes(translate: Translate): PermissionMode[]
 // do not all mean what the row says. `sonnet` still resolves to Sonnet 4.6 in
 // the CLI's alias table, and `opus-5` is not in that table at all (`claude
 // --model opus-5` errors on 2.1.199). Full IDs pass straight through to the
-// API, so they say exactly which model is meant. The `[1m]` suffix is part of
-// the model ID Claude Code accepts (`claude --model 'claude-opus-5[1m]'`) and
-// selects the 1M-context variant; unknown bracket models are rejected, so the
-// suffix is honored rather than silently dropped (#1721).
+// API, so they say exactly which model is meant.
+//
+// One row per model, with no `[1m]` twins. Every model here is 1M-native in
+// Claude Code's own model table (`context.native_1m`), so the plain ID already
+// gets the 1M window, and the suffix only adds the context-1m beta header —
+// which gateways, Bedrock, Vertex and Foundry can refuse. Saved `[1m]` keys are
+// mapped onto these rows by retireModelMode.
+//
+// Sonnet 5.5 and Haiku 5.5 are in that table from Claude Code 2.1.287 and
+// 2.1.293. happy-cli now requires Agent SDK 0.3.295 (2.1.295), but an older
+// install can still carry 0.3.283 (2.1.283), which runs them as unknown
+// models: at 200K, compacting early.
 export function getClaudeModelModes(): ModelMode[] {
     return [
-        { key: 'claude-fable-5', name: 'Fable 5', description: null },
-        { key: 'claude-opus-5', name: 'Opus 5', description: null },
-        { key: 'claude-opus-5[1m]', name: 'Opus 5 [1M]', description: '1M context' },
-        { key: 'claude-sonnet-5', name: 'Sonnet 5', description: null },
+        { key: 'claude-fable-5-1', name: 'Fable 5.1', description: '1M context', providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-fable-5', name: 'Fable 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-opus-5-5', name: 'Opus 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-opus-5', name: 'Opus 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-sonnet-5-5', name: 'Sonnet 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-haiku-5-5', name: 'Haiku 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
     ];
 }
+
+// Display names for Claude models that left the list but can still be saved,
+// so their saved row reads like the rest instead of as a raw model ID.
+const UNLISTED_CLAUDE_MODEL_NAMES: Record<string, string> = {
+    'claude-sonnet-5': 'Sonnet 5',
+};
 
 export function getCodexModelModes(): ModelMode[] {
     return [
-        { key: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: null },
-        { key: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: null },
-        { key: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: null },
+        { key: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'most capable', providerId: 'openai', providerName: 'OpenAI' },
+        { key: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', description: null, providerId: 'openai', providerName: 'OpenAI' },
+        { key: 'gpt-6-sol', name: 'GPT-6 Sol', description: null, providerId: 'openai', providerName: 'OpenAI' },
+        { key: 'gpt-6-luna', name: 'GPT-6 Luna', description: null, providerId: 'openai', providerName: 'OpenAI' },
+        { key: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: null, providerId: 'openai', providerName: 'OpenAI' },
+        { key: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: null, providerId: 'openai', providerName: 'OpenAI' },
+        { key: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: null, providerId: 'openai', providerName: 'OpenAI' },
     ];
 }
 
+/**
+ * Appends the saved model when the list does not offer it, so a pick that left
+ * the catalog still shows as itself instead of the picker landing on whatever
+ * leads the list. For Claude that is a model that was retired from the picker
+ * but still runs (Sonnet 5); a saved `[1m]` key is first mapped onto its row.
+ */
 export function includeConfiguredModel(
     flavor: AgentFlavor,
     models: ModelMode[],
     configuredModelKey: string | null | undefined,
 ): ModelMode[] {
+    const isClaude = flavor !== 'rig' && normalizeAgentKey(flavor) === 'claude';
+    const key = retireModelMode(flavor, configuredModelKey);
     if (
-        flavor !== 'codex'
-        || !configuredModelKey
-        || configuredModelKey === 'default'
-        || models.some((model) => model.key === configuredModelKey)
+        (flavor !== 'codex' && flavor !== 'agy' && !isClaude)
+        || !key
+        || key === 'default'
+        || models.some((model) => model.key === key)
     ) {
         return models;
     }
     return [
         ...models,
         {
-            key: configuredModelKey,
-            name: configuredModelKey,
-            description: 'custom model',
+            key,
+            name: (isClaude ? UNLISTED_CLAUDE_MODEL_NAMES[key] : undefined) ?? key,
+            description: flavor === 'codex' ? 'custom model' : 'saved model',
         },
     ];
 }
@@ -296,20 +354,15 @@ export function getOpenClawModelModes(): ModelMode[] {
     ];
 }
 
-// Keys are the exact display names `agy --model` accepts (as printed by `agy models`).
+// Gemini effort is deliberately not encoded into separate model rows. Happy's
+// existing effort picker carries `low`/`medium`/`high` independently, and happy-cli
+// resolves the pair to the exact display name `agy --model` accepts.
 export function getAgyModelModes(): ModelMode[] {
     return [
-        { key: 'Gemini 3.6 Flash (High)', name: 'Gemini 3.6 Flash (High)', description: null },
-        { key: 'Gemini 3.6 Flash (Medium)', name: 'Gemini 3.6 Flash (Medium)', description: null },
-        { key: 'Gemini 3.6 Flash (Low)', name: 'Gemini 3.6 Flash (Low)', description: null },
-        { key: 'Gemini 3.1 Pro (High)', name: 'Gemini 3.1 Pro (High)', description: null },
-        { key: 'Gemini 3.1 Pro (Low)', name: 'Gemini 3.1 Pro (Low)', description: null },
-        { key: 'Gemini 3.5 Flash (High)', name: 'Gemini 3.5 Flash (High)', description: null },
-        { key: 'Gemini 3.5 Flash (Medium)', name: 'Gemini 3.5 Flash (Medium)', description: null },
-        { key: 'Gemini 3.5 Flash (Low)', name: 'Gemini 3.5 Flash (Low)', description: null },
-        { key: 'Claude Opus 4.6 (Thinking)', name: 'Claude Opus 4.6 (Thinking)', description: null },
-        { key: 'Claude Sonnet 4.6 (Thinking)', name: 'Claude Sonnet 4.6 (Thinking)', description: null },
-        { key: 'GPT-OSS 120B (Medium)', name: 'GPT-OSS 120B (Medium)', description: null },
+        { key: 'Gemini 3.8 Flash', name: 'Gemini 3.8 Flash', description: null, providerId: 'google', providerName: 'Google' },
+        { key: 'Claude Sonnet 4.6 (Thinking)', name: 'Claude Sonnet 4.6 (Thinking)', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'Claude Opus 4.6 (Thinking)', name: 'Claude Opus 4.6 (Thinking)', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'GPT-OSS 120B (Medium)', name: 'GPT-OSS 120B (Medium)', description: null, providerId: 'openai', providerName: 'OpenAI' },
     ];
 }
 
@@ -336,7 +389,7 @@ export function getAvailableModels(
     selectedKey?: string | null,
 ): ModelMode[] {
     if (isRigMetadataV1(metadata)) {
-        const models: ModelMode[] = getRigModels(metadata).map((model) => ({
+        const models: ModelMode[] = sortRigModelsForPicker(getRigModels(metadata)).map((model) => ({
             key: model.key,
             name: model.name,
             description: model.providerName,
@@ -351,7 +404,7 @@ export function getAvailableModels(
         }));
         const current = getRigCurrentModel(metadata);
         if (current?.unavailable && !models.some((model) => model.key === current.key)) {
-            models.unshift({
+            models.push({
                 key: current.key,
                 name: current.name,
                 description: `${current.providerName} · unavailable`,
@@ -370,7 +423,7 @@ export function getAvailableModels(
             const separator = locallySelectedKey.indexOf(':');
             const providerId = locallySelectedKey.slice(0, separator);
             const modelId = locallySelectedKey.slice(separator + 1);
-            models.unshift({
+            models.push({
                 key: locallySelectedKey,
                 name: modelId,
                 description: `${providerId} · unavailable`,
@@ -463,8 +516,8 @@ export function resolveCurrentOption<T extends ModeOption>(
     return null;
 }
 
-export function getDefaultModelKey(flavor: AgentFlavor): string {
-    return getCodeAgentDefaults(flavor).modelMode;
+export function getDefaultModelKey(flavor: AgentFlavor, cliVersion?: string | null): string {
+    return getCodeAgentDefaults(flavor, cliVersion).modelMode;
 }
 
 export function getDefaultPermissionModeKey(flavor: AgentFlavor): string {
@@ -492,13 +545,25 @@ function effortLevels(keys: readonly string[]): EffortLevel[] {
 // `off`: Claude's floor is `low`.
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
+// Antigravity exposes Gemini 3.8 Flash's three selectable thinking variants as
+// separate model display names. Happy presents them through its effort picker;
+// happy-cli performs the final model-name mapping at the provider boundary.
+const AGY_EFFORTS_BY_MODEL: Record<string, readonly string[]> = {
+    'Gemini 3.8 Flash': ['low', 'medium', 'high'],
+};
+
 // Exactly what each model publishes in Codex's own registry, in its order
-// (codex-rs/models-manager/models.json, min client 0.144). This really is
-// per-model: sol and terra reach `ultra`, luna stops at `max`. `ultra` is
-// documented as maximum reasoning with automatic task delegation, so it is a
-// different kind of run rather than one more notch — but it is a level these
-// two models accept, so the picker offers it rather than deciding for you.
+// (codex-rs/models-manager/models.json; astra verified against the 0.153.4
+// host registry). This really is per-model: astra, sol, and terra reach
+// `ultra`, luna stops at `max`. `ultra` is documented as maximum reasoning
+// with automatic task delegation, so it is a different kind of run rather
+// than one more notch — but it is a level these models accept, so the picker
+// offers it rather than deciding for you.
 const CODEX_EFFORTS_BY_MODEL: Record<string, readonly string[]> = {
+    'gpt-6-astra': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    'gpt-6.1-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    'gpt-6-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    'gpt-6-luna': ['low', 'medium', 'high', 'xhigh', 'max'],
     'gpt-5.6-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     'gpt-5.6-terra': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     'gpt-5.6-luna': ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -507,6 +572,10 @@ const CODEX_EFFORTS_FALLBACK = ['low', 'medium', 'high', 'xhigh'] as const;
 
 export function getClaudeEffortLevels(): EffortLevel[] {
     return effortLevels(CLAUDE_EFFORTS);
+}
+
+export function getAgyEffortLevels(modelKey?: string | null): EffortLevel[] {
+    return effortLevels((modelKey ? AGY_EFFORTS_BY_MODEL[modelKey] : undefined) ?? []);
 }
 
 /**
@@ -523,6 +592,7 @@ export function getCodexEffortLevels(modelKey?: string | null): EffortLevel[] {
 export function getHardcodedEffortLevels(flavor: AgentFlavor): EffortLevel[] {
     if (flavor === 'claude') return getClaudeEffortLevels();
     if (flavor === 'codex') return getCodexEffortLevels();
+    if (flavor === 'agy') return getAgyEffortLevels(getDefaultModelKey('agy'));
     return [];
 }
 
@@ -553,6 +623,9 @@ export function getEffortLevelsForModel(
     if (flavor === 'codex') {
         return getCodexEffortLevels(modelKey);
     }
+    if (flavor === 'agy') {
+        return getAgyEffortLevels(modelKey);
+    }
     return [];
 }
 
@@ -570,4 +643,28 @@ export function getDefaultEffortKeyForModel(flavor: AgentFlavor, modelKey: strin
 export function getSupportsWorktree(flavor: AgentFlavor): boolean {
     if (flavor === 'openclaw') return false;
     return true;
+}
+
+/** The most characters a model name may take on the composer's chip. */
+export const MODEL_CHIP_LABEL_MAX_LENGTH = 16;
+
+/**
+ * The model name as it fits on the composer's chip.
+ *
+ * The chip is the only elastic thing between the add button and send, so a long
+ * name — "Claude Sonnet thinking" — used to push send over. Native menus size
+ * their trigger to the whole string they are handed, so the cut has to happen
+ * here rather than being left to `numberOfLines`. It falls on a word boundary
+ * when one is near the limit: "Claude Sonnet…" rather than "Claude Sonnet th…".
+ */
+export function truncateModelLabel(
+    label: string,
+    max: number = MODEL_CHIP_LABEL_MAX_LENGTH,
+): string {
+    const trimmed = label.trim();
+    if (trimmed.length <= max) return trimmed;
+    const cut = trimmed.slice(0, max);
+    const lastSpace = cut.lastIndexOf(' ');
+    const head = lastSpace >= max - 8 ? cut.slice(0, lastSpace) : cut.trimEnd();
+    return `${head}…`;
 }
