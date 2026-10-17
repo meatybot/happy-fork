@@ -92,6 +92,11 @@ export default {
                 : {})
         },
         android: {
+            // Android 9+ (API 28) blocks plaintext HTTP by default, which
+            // breaks a self-hosted http:// server. Applied via
+            // ./plugins/withCleartextTraffic.js -- Expo has no top-level
+            // android.usesCleartextTraffic key. iOS uses
+            // NSAllowsLocalNetworking above.
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",
@@ -135,6 +140,7 @@ export default {
         },
         plugins: [
             require("./plugins/withEinkCompatibility.js"),
+            require("./plugins/withCleartextTraffic.js"),
             [
                 "expo-router",
                 {
