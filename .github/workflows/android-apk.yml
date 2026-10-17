@@ -48,7 +48,10 @@ jobs:
               uses: actions/checkout@v7
               with:
                   fetch-depth: 0
-                  token: ${{ secrets.GITHUB_TOKEN }}
+                  # Deploy key, not GITHUB_TOKEN: GITHUB_TOKEN cannot push a
+                  # ref that touches .github/workflows/**, and upstream ships
+                  # its own workflow files. An SSH deploy-key push is exempt.
+                  ssh-key: ${{ secrets.FORK_SYNC_SSH_KEY }}
 
             - name: Merge upstream
               run: |
@@ -60,19 +63,20 @@ jobs:
                   # Keep our workflow/README on top of upstream's history.
                   git merge --no-edit -X ours upstream/main || {
                       echo "::error::Merge conflict with upstream -- resolve locally"; exit 1; }
-                  # GITHUB_TOKEN can never push .github/workflows -- no
-                  # `permissions:` key grants it, so a new upstream workflow
-                  # file (e.g. expo-tailcat.yml) hard-fails the push. Restore
-                  # this fork's workflow dir verbatim and drop upstream's.
-                  # The directory is removed first: `git checkout` alone
-                  # leaves merge-added files in place.
-                  if ! git diff --quiet "$BEFORE" HEAD -- .github/workflows; then
-                      rm -rf .github/workflows
-                      git checkout "$BEFORE" -- .github/workflows
-                      git add -A .github/workflows
-                      git commit -q --no-verify -m 'ci: keep fork workflows (GITHUB_TOKEN cannot push workflow files)' || true
-                  fi
                   echo "BEFORE=$BEFORE" >> "$GITHUB_ENV"
+
+            # A `-X ours` merge silently keeps upstream's side of a file this
+            # fork rewrote if the patch ever lands upstream in another shape.
+            # Fail loudly rather than shipping an APK missing the fork's fixes.
+            - name: Verify fork patches survived the merge
+              run: |
+                  set -euo pipefail
+                  test -f packages/happy-app/plugins/withCleartextTraffic.js \
+                      || { echo '::error::withCleartextTraffic.js plugin is missing'; exit 1; }
+                  grep -q 'withCleartextTraffic' packages/happy-app/app.config.js \
+                      || { echo '::error::withCleartextTraffic is not registered in app.config.js'; exit 1; }
+                  grep -q 'This is a fork' README.md \
+                      || { echo '::error::README fork banner is missing'; exit 1; }
 
             - name: Detect changes
               id: check
